@@ -173,9 +173,13 @@ interface DialogButton {
  * Show a reusable modal dialog. Returns the index of the button clicked.
  * Example: await showDialog('Error', 'File not found.', [{ label: 'OK', primary: true }])
  */
-function showDialog(title: string, message: string, buttons: DialogButton[]): Promise<number> {
+function showDialog(title: string, message: string, buttons: DialogButton[], html = false): Promise<number> {
   dialogTitle.textContent = title
-  dialogMessage.textContent = message
+  if (html) {
+    dialogMessage.innerHTML = message
+  } else {
+    dialogMessage.textContent = message
+  }
   dialogActions.innerHTML = ''
 
   return new Promise<number>((resolve) => {
@@ -715,12 +719,31 @@ function checkDirty() {
   updatePresetBar()
 }
 
-function makeAddPresetButton(): HTMLButtonElement {
-  const btn = document.createElement('button')
-  btn.className = 'preset-add-btn'
-  btn.textContent = '+ New Preset'
-  btn.addEventListener('click', addNewPreset)
-  return btn
+function makePresetActions(): HTMLElement {
+  const wrap = document.createElement('div')
+
+  const addBtn = document.createElement('button')
+  addBtn.className = 'preset-add-btn'
+  addBtn.textContent = '+ New Preset'
+  addBtn.addEventListener('click', addNewPreset)
+  wrap.appendChild(addBtn)
+
+  const ioRow = document.createElement('div')
+  ioRow.className = 'preset-io-row'
+
+  const importBtn = document.createElement('button')
+  importBtn.textContent = 'Import'
+  importBtn.addEventListener('click', importPreset)
+  ioRow.appendChild(importBtn)
+
+  const exportBtn = document.createElement('button')
+  exportBtn.textContent = 'Export'
+  exportBtn.disabled = !activeId
+  exportBtn.addEventListener('click', exportPreset)
+  ioRow.appendChild(exportBtn)
+
+  wrap.appendChild(ioRow)
+  return wrap
 }
 
 // ==========================================================================
@@ -860,10 +883,10 @@ function renderPresetList() {
       localSection.appendChild(item)
     }
 
-    localSection.appendChild(makeAddPresetButton())
+    localSection.appendChild(makePresetActions())
     presetListEl.appendChild(localSection)
   } else {
-    presetListEl.appendChild(makeAddPresetButton())
+    presetListEl.appendChild(makePresetActions())
   }
 }
 
@@ -904,6 +927,104 @@ function deleteLocalPreset(id: string) {
   flushSaveLocal()
   renderPresetList()
   updatePresetBar()
+}
+
+// ==========================================================================
+// Preset file import/export (.filmkit / .json)
+// ==========================================================================
+
+/** Build a human-readable label for a grain effect combined value. */
+function grainLabel(combined: number): string {
+  if (combined === 0) return 'Off'
+  const strength = GrainStrengthLabels[combined & 0xFF]
+  const size = GrainSizeLabels[(combined >> 8) & 0xFF]
+  if (!strength) return `Unknown (${combined})`
+  return `${strength} ${size ?? 'Small'}`
+}
+
+/** Export the currently active preset to a .filmkit file. */
+function exportPreset() {
+  if (!activeId) return
+  const wc = workingCopies.get(activeId)
+  const preset = store.presets.get(activeId)
+  const name = presetBarName.value || (wc?.name ?? preset?.name ?? 'Untitled')
+  const values = wc?.values ?? preset?.values
+  if (!values) return
+
+  const data = {
+    filmkit: 1,
+    name,
+    values: { ...values },
+    _labels: {
+      filmSimulation: FilmSimLabels[values.filmSimulation] ?? 'Unknown',
+      whiteBalance: WBModeLabels[values.whiteBalance] ?? 'Unknown',
+      dynamicRange: DynRangeLabels[values.dynamicRange] ?? 'Auto',
+      grainEffect: grainLabel(values.grainEffect),
+      colorChrome: ColorChromeLabels[values.colorChrome] ?? 'Unknown',
+      colorChromeFxBlue: ColorChromeFxBlueLabels[values.colorChromeFxBlue] ?? 'Unknown',
+      smoothSkin: SmoothSkinLabels[values.smoothSkin] ?? 'Unknown',
+      dRangePriority: DRangePriorityLabels[values.dRangePriority] ?? 'Unknown',
+    },
+  }
+
+  const json = JSON.stringify(data, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || 'preset'
+  a.download = safeName + '.filmkit'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Import a .filmkit or .json file as a new local preset. */
+async function importPreset() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.filmkit,.json'
+
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+
+      // Validate structure
+      if (!data.values || typeof data.values !== 'object') {
+        await showDialog('Import Error', 'Invalid file: missing preset values.', [{ label: 'OK', primary: true }])
+        return
+      }
+
+      // Build PresetUIValues with defaults for missing fields
+      const defaults: PresetUIValues = {
+        filmSimulation: 0, dynamicRange: 0, grainEffect: 0, smoothSkin: 0,
+        colorChrome: 0, colorChromeFxBlue: 0, whiteBalance: 0, wbShiftR: 0,
+        wbShiftB: 0, wbColorTemp: 6500, highlightTone: 0, shadowTone: 0,
+        color: 0, sharpness: 0, noiseReduction: 0, clarity: 0, exposure: 0,
+        dRangePriority: 0, monoWC: 0, monoMG: 0,
+      }
+      const values: PresetUIValues = { ...defaults }
+      for (const key of Object.keys(defaults) as (keyof PresetUIValues)[]) {
+        const v = data.values[key]
+        if (typeof v === 'number' && isFinite(v)) {
+          values[key] = v
+        }
+      }
+
+      const name = typeof data.name === 'string' ? data.name : file.name.replace(/\.(filmkit|json)$/i, '')
+      const id = addLocalPreset(store, name, values)
+      flushSaveLocal()
+      selectPreset(id)
+      log(`Imported preset: "${name}"`)
+    } catch {
+      await showDialog('Import Error', 'Failed to parse file. Expected a .filmkit or .json preset file.', [{ label: 'OK', primary: true }])
+    }
+  })
+
+  input.click()
 }
 
 /** Update the preset bar (right sidebar header). */
@@ -1120,13 +1241,37 @@ btnConnect.addEventListener('click', async () => {
   showLoading('Loading presets...')
   try {
     const scanned = await camera.scanPresets()
-    store = createStoreFromScan(scanned)
-    workingCopies.clear()
-    activeId = null
-    renderPresetList()
-    updatePresetBar()
+    if (scanned.length === 0) {
+      hideLoading()
+      log('No presets found — camera may be in wrong USB mode')
+      await showDialog(
+        'Camera Mode Error',
+        'Failed to read camera presets. Your camera may be in the wrong USB mode.<br><br>'
+        + 'On your camera, go to:<br>'
+        + '<b>Network/USB Setting → Connection Mode → USB Raw Conv./Backup Restore</b><br><br>'
+        + 'Then disconnect and reconnect.',
+        [{ label: 'OK', primary: true }],
+        true,
+      )
+    } else {
+      store = createStoreFromScan(scanned)
+      workingCopies.clear()
+      activeId = null
+      renderPresetList()
+      updatePresetBar()
+    }
   } catch (err) {
     log(`Preset scan error: ${err}`)
+    hideLoading()
+    await showDialog(
+      'Camera Mode Error',
+      'Failed to read camera properties. Your camera may be in the wrong USB mode.<br><br>'
+      + 'On your camera, go to:<br>'
+      + '<b>Network/USB Setting → Connection Mode → USB Raw Conv./Backup Restore</b><br><br>'
+      + 'Then disconnect and reconnect.',
+      [{ label: 'OK', primary: true }],
+      true,
+    )
   }
 
   hideLoading()
@@ -1422,6 +1567,20 @@ loadRecentFromStorage().then(files => {
 })
 
 log('FilmKit ready. Connect your camera to begin.')
+
+// Beta disclaimer — shown once per browser
+const BETA_KEY = 'filmkit:beta-dismissed'
+if (!localStorage.getItem(BETA_KEY)) {
+  showDialog(
+    'Beta',
+    'FilmKit is in beta and has only been tested on <b>X100VI</b>. '
+    + 'It should work with other Fujifilm X-Trans cameras, but this has not been verified.<br><br>'
+    + 'If you have a different camera, please help us expand support: '
+    + '<a href="https://github.com/eggricesoy/filmkit#supporting-new-cameras" target="_blank" rel="noopener" style="color:var(--accent)">Supporting New Cameras</a>',
+    [{ label: 'Got it', primary: true }],
+    true,
+  ).then(() => localStorage.setItem(BETA_KEY, '1'))
+}
 
 // ==========================================================================
 // Mobile tab switching

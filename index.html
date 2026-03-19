@@ -474,6 +474,26 @@
       background: var(--surface-raised);
     }
 
+    .preset-io-row {
+      display: flex;
+      gap: 0.3rem;
+      margin-top: 0.3rem;
+    }
+    .preset-io-row button {
+      flex: 1;
+      padding: 0.3rem;
+      font-size: var(--font-s);
+      color: var(--text-muted);
+      background: none;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+    }
+    .preset-io-row button:hover:not(:disabled) {
+      color: var(--text-dim);
+      border-color: var(--text-muted);
+      background: var(--surface-raised);
+    }
+
     /* Section dividers */
     .preset-divider {
       font-family: var(--mono);
