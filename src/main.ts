@@ -14,7 +14,8 @@ import {
   DRangePriorityLabels,
 } from './profile/enums.ts'
 import { patchProfile, type ConversionParams } from './profile/d185.ts'
-import { cameraProfileToUIValues, translateUIToPresetProps, type PresetUIValues } from './profile/preset-translate.ts'
+import { cameraProfileToUIValues, translateUIToPresetProps, PRESET_DEFAULTS, type PresetUIValues } from './profile/preset-translate.ts'
+import { parseTextPreset, FIELD_LABELS } from './parse-text-preset.ts'
 import {
   type PresetStore, type WorkingPreset,
   createStoreFromScan, createEmptyStore,
@@ -56,6 +57,10 @@ const resultInfo = $('result-info')
 const resultDownload = $<HTMLAnchorElement>('result-download')
 const previewStatus = $('preview-status')
 const canvasEmpty = $('canvas-empty')
+const canvasEmptyText = $('canvas-empty-text')
+
+// Needs-render indicator
+const needsRenderText = $('needs-render-text')
 
 // Debug
 const logEl = $('log')
@@ -72,6 +77,13 @@ const dialogOverlay = $('dialog-overlay')
 const dialogTitle = $('dialog-title')
 const dialogMessage = $('dialog-message')
 const dialogActions = $('dialog-actions')
+
+// Paste import overlay
+const pasteOverlay = $('paste-overlay')
+const pasteNameInput = $<HTMLInputElement>('paste-name')
+const pasteTextarea = $<HTMLTextAreaElement>('paste-text')
+const pasteCancelBtn = $<HTMLButtonElement>('paste-cancel')
+const pasteImportBtn = $<HTMLButtonElement>('paste-import')
 
 // Selects
 const filmSimSelect   = $<HTMLSelectElement>('film-sim')
@@ -114,6 +126,7 @@ let camera: FujiCamera | null = null
 let rafData: ArrayBuffer | null = null
 let rafFileName = ''
 let resultBlobUrl: string | null = null
+let lastRenderedSettings: ConversionParams | null = null
 
 // Recent files — FileSystemFileHandles persisted in IndexedDB, thumbnails in localStorage
 interface RecentFile {
@@ -223,7 +236,7 @@ function updateUI() {
 
   statusEl.className = `status-badge ${connected ? 'on' : 'off'}`
   statusEl.textContent = connected ? 'Connected' : 'Disconnected'
-  cameraNameEl.textContent = connected ? camera!.deviceName : ''
+  cameraNameEl.textContent = connected ? camera!.modelName : ''
 
   btnConnect.disabled = connected
   btnDisconnect.disabled = !connected
@@ -232,6 +245,9 @@ function updateUI() {
 
   // Show render button when RAF is loaded and auto-render is off
   btnRender.hidden = !rafReady || autoRenderCheckbox.checked
+
+  // Canvas empty state text
+  canvasEmptyText.textContent = connected ? 'Load a RAF file to preview' : 'Connect to camera to begin'
 }
 
 function showResult(jpeg: Uint8Array) {
@@ -372,6 +388,12 @@ function renderRecentFiles() {
     name.textContent = f.name
     item.appendChild(name)
 
+    const del = document.createElement('button')
+    del.className = 'recent-delete'
+    del.textContent = '\u00d7'
+    del.addEventListener('click', (e) => { e.stopPropagation(); removeRecentEntry(f.name); renderRecentFiles() })
+    item.appendChild(del)
+
     item.addEventListener('click', () => loadRecentFile(f))
     recentFilesEl.appendChild(item)
   }
@@ -386,6 +408,7 @@ async function loadRecentFile(f: RecentFile) {
   if (f.data) {
     rafData = f.data
     rafFileName = f.name
+    currentFileHandle = f.handle
     await doLoadRaf()
     return
   }
@@ -731,10 +754,45 @@ function makePresetActions(): HTMLElement {
   const ioRow = document.createElement('div')
   ioRow.className = 'preset-io-row'
 
+  // Import button with dropdown (From File / From Text)
+  const importAnchor = document.createElement('div')
+  importAnchor.className = 'import-dropdown-anchor'
+
   const importBtn = document.createElement('button')
   importBtn.textContent = 'Import'
-  importBtn.addEventListener('click', importPreset)
-  ioRow.appendChild(importBtn)
+  importBtn.style.width = '100%'
+  importBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    // Toggle dropdown
+    const existing = importAnchor.querySelector('.import-dropdown')
+    if (existing) { existing.remove(); return }
+
+    const dropdown = document.createElement('div')
+    dropdown.className = 'import-dropdown'
+
+    const fileBtn = document.createElement('button')
+    fileBtn.textContent = 'From File'
+    fileBtn.addEventListener('click', (ev) => { ev.stopPropagation(); dropdown.remove(); importFromFile() })
+    dropdown.appendChild(fileBtn)
+
+    const pasteBtn = document.createElement('button')
+    pasteBtn.textContent = 'From Text'
+    pasteBtn.addEventListener('click', (ev) => { ev.stopPropagation(); dropdown.remove(); showPasteOverlay() })
+    dropdown.appendChild(pasteBtn)
+
+    importAnchor.appendChild(dropdown)
+
+    // Dismiss on outside click
+    const dismiss = (ev: MouseEvent) => {
+      if (!importAnchor.contains(ev.target as Node)) {
+        dropdown.remove()
+        document.removeEventListener('click', dismiss)
+      }
+    }
+    setTimeout(() => document.addEventListener('click', dismiss), 0)
+  })
+  importAnchor.appendChild(importBtn)
+  ioRow.appendChild(importAnchor)
 
   const exportBtn = document.createElement('button')
   exportBtn.textContent = 'Export'
@@ -978,8 +1036,35 @@ function exportPreset() {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Import a parsed JSON object as a local preset.
+ * Returns the preset name on success, or an error string on failure.
+ */
+function importFromJSON(data: unknown, fallbackName: string): { name: string } | { error: string } {
+  if (!data || typeof data !== 'object') return { error: 'Invalid data.' }
+  const obj = data as Record<string, unknown>
+  if (!obj.values || typeof obj.values !== 'object') {
+    return { error: 'Invalid file: missing preset values.' }
+  }
+
+  const values: PresetUIValues = { ...PRESET_DEFAULTS }
+  for (const key of Object.keys(PRESET_DEFAULTS) as (keyof PresetUIValues)[]) {
+    const v = (obj.values as Record<string, unknown>)[key]
+    if (typeof v === 'number' && isFinite(v)) {
+      values[key] = v
+    }
+  }
+
+  const name = typeof obj.name === 'string' ? obj.name : fallbackName
+  const id = addLocalPreset(store, name, values)
+  flushSaveLocal()
+  selectPreset(id)
+  log(`Imported preset: "${name}"`)
+  return { name }
+}
+
 /** Import a .filmkit or .json file as a new local preset. */
-async function importPreset() {
+async function importFromFile() {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.filmkit,.json'
@@ -991,34 +1076,10 @@ async function importPreset() {
     try {
       const text = await file.text()
       const data = JSON.parse(text)
-
-      // Validate structure
-      if (!data.values || typeof data.values !== 'object') {
-        await showDialog('Import Error', 'Invalid file: missing preset values.', [{ label: 'OK', primary: true }])
-        return
+      const result = importFromJSON(data, file.name.replace(/\.(filmkit|json)$/i, ''))
+      if ('error' in result) {
+        await showDialog('Import Error', result.error, [{ label: 'OK', primary: true }])
       }
-
-      // Build PresetUIValues with defaults for missing fields
-      const defaults: PresetUIValues = {
-        filmSimulation: 0, dynamicRange: 0, grainEffect: 0, smoothSkin: 0,
-        colorChrome: 0, colorChromeFxBlue: 0, whiteBalance: 0, wbShiftR: 0,
-        wbShiftB: 0, wbColorTemp: 6500, highlightTone: 0, shadowTone: 0,
-        color: 0, sharpness: 0, noiseReduction: 0, clarity: 0, exposure: 0,
-        dRangePriority: 0, monoWC: 0, monoMG: 0,
-      }
-      const values: PresetUIValues = { ...defaults }
-      for (const key of Object.keys(defaults) as (keyof PresetUIValues)[]) {
-        const v = data.values[key]
-        if (typeof v === 'number' && isFinite(v)) {
-          values[key] = v
-        }
-      }
-
-      const name = typeof data.name === 'string' ? data.name : file.name.replace(/\.(filmkit|json)$/i, '')
-      const id = addLocalPreset(store, name, values)
-      flushSaveLocal()
-      selectPreset(id)
-      log(`Imported preset: "${name}"`)
     } catch {
       await showDialog('Import Error', 'Failed to parse file. Expected a .filmkit or .json preset file.', [{ label: 'OK', primary: true }])
     }
@@ -1026,6 +1087,113 @@ async function importPreset() {
 
   input.click()
 }
+
+// ==========================================================================
+// Paste import overlay
+// ==========================================================================
+
+function showPasteOverlay() {
+  pasteNameInput.value = ''
+  pasteTextarea.value = ''
+  pasteImportBtn.disabled = true
+  pasteOverlay.classList.add('visible')
+  pasteNameInput.focus()
+}
+
+function hidePasteOverlay() {
+  pasteOverlay.classList.remove('visible')
+}
+
+function updatePasteImportBtn() {
+  pasteImportBtn.disabled = !pasteNameInput.value.trim() || !pasteTextarea.value.trim()
+}
+pasteNameInput.addEventListener('input', updatePasteImportBtn)
+pasteTextarea.addEventListener('input', updatePasteImportBtn)
+
+/** Build an HTML summary of the text parse result for the confirmation dialog. */
+function buildParseSummary(result: ReturnType<typeof parseTextPreset>): string {
+  const lines: string[] = []
+
+  if (result.recognized.length) {
+    for (const r of result.recognized) {
+      const fieldNames = r.fields.map(f => FIELD_LABELS[f] ?? f).join(', ')
+      lines.push(`<span style="color:var(--success)">\u2713</span> ${esc(r.line)} <span style="color:var(--text-muted)">\u2192 ${esc(fieldNames)}</span>`)
+    }
+  }
+
+  if (result.unrecognized.length) {
+    for (const u of result.unrecognized) {
+      lines.push(`<span style="color:#c88">\u2717</span> ${esc(u)} <span style="color:var(--text-muted)">(unrecognized)</span>`)
+    }
+  }
+
+  if (result.ignored.length) {
+    for (const ig of result.ignored) {
+      lines.push(`<span style="color:var(--text-muted)">\u2014 ${esc(ig)} (ignored)</span>`)
+    }
+  }
+
+  return `<div style="font-size:var(--font-m);line-height:1.8;max-height:16rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent">${lines.join('<br>')}</div>`
+}
+
+/** Escape HTML special characters */
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+async function handlePasteImport() {
+  const text = pasteTextarea.value.trim()
+  const presetName = pasteNameInput.value.trim()
+  if (!text || !presetName) return
+
+  // Try JSON first (filmkit format)
+  try {
+    const data = JSON.parse(text)
+    const result = importFromJSON(data, presetName)
+    if ('error' in result) {
+      await showDialog('Import Error', result.error, [{ label: 'OK', primary: true }])
+    } else {
+      hidePasteOverlay()
+    }
+    return
+  } catch {
+    // Not JSON — fall through to text parsing
+  }
+
+  // Text parsing (FXW format)
+  const result = parseTextPreset(text)
+
+  if (Object.keys(result.values).length === 0) {
+    await showDialog('Import Error', 'No preset fields could be recognized from the text.', [{ label: 'OK', primary: true }])
+    return
+  }
+
+  // Show summary for confirmation
+  const summary = buildParseSummary(result)
+  const choice = await showDialog(
+    'Import Summary',
+    summary,
+    [{ label: 'Cancel' }, { label: 'Import', primary: true }],
+    true,
+  )
+
+  if (choice !== 1) return
+
+  // Merge parsed values with defaults
+  const values: PresetUIValues = { ...PRESET_DEFAULTS }
+  for (const [k, v] of Object.entries(result.values)) {
+    ;(values as unknown as Record<string, number>)[k] = v as number
+  }
+
+  const id = addLocalPreset(store, presetName, values)
+  flushSaveLocal()
+  selectPreset(id)
+  hidePasteOverlay()
+  log(`Imported preset: "${presetName}"`)
+}
+
+pasteCancelBtn.addEventListener('click', hidePasteOverlay)
+pasteImportBtn.addEventListener('click', handlePasteImport)
 
 /** Update the preset bar (right sidebar header). */
 function updatePresetBar() {
@@ -1169,6 +1337,17 @@ const DEBOUNCE_MS = 400
 const mobileQuery = window.matchMedia('(max-width: 900px)')
 let mobilePreviewDirty = false
 
+/** Check if the displayed image is stale (settings changed since last render). */
+function updateNeedsRender() {
+  if (!lastRenderedSettings || !resultPanel.classList.contains('visible')) {
+    needsRenderText.classList.remove('visible')
+    return
+  }
+  const current = getSettings()
+  const stale = JSON.stringify(current) !== JSON.stringify(lastRenderedSettings)
+  needsRenderText.classList.toggle('visible', stale)
+}
+
 function schedulePreview() {
   if (!camera?.rafLoaded) return
   // Mobile: defer render until user switches to Preview tab
@@ -1176,28 +1355,40 @@ function schedulePreview() {
     mobilePreviewDirty = true
     return
   }
-  if (!autoRenderCheckbox.checked) return // manual mode — user clicks Render
+  if (!autoRenderCheckbox.checked) { updateNeedsRender(); return } // manual mode — user clicks Render
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(doPreview, DEBOUNCE_MS)
 }
 
-async function doPreview() {
+async function doPreview(force = false) {
   if (!camera?.rafLoaded) return
 
+  // Skip if settings haven't changed since last render (unless forced)
+  if (!force && lastRenderedSettings) {
+    const current = getSettings()
+    if (JSON.stringify(current) === JSON.stringify(lastRenderedSettings)) {
+      needsRenderText.classList.remove('visible')
+      return
+    }
+  }
+
+  needsRenderText.classList.remove('visible')
   previewStatus.textContent = 'Rendering...'
-  previewStatus.classList.add('active')
+  previewStatus.parentElement!.classList.add('active')
 
   try {
     const settings = getSettings()
     const jpeg = await camera.reconvert((base) => patchProfile(base, settings))
     showResult(jpeg)
+    lastRenderedSettings = settings
     previewStatus.textContent = ''
-    previewStatus.classList.remove('active')
+    previewStatus.parentElement!.classList.remove('active')
   } catch (err) {
     if (err instanceof CancelledError) return // superseded by newer render
     log(`Preview error: ${err}`)
     previewStatus.textContent = 'Error'
-    previewStatus.classList.remove('active')
+    previewStatus.parentElement!.classList.remove('active')
+    updateNeedsRender()
   }
 }
 
@@ -1323,8 +1514,10 @@ function resetApp() {
   if (resultBlobUrl) { URL.revokeObjectURL(resultBlobUrl); resultBlobUrl = null }
   resultPanel.classList.remove('visible')
   canvasEmpty.hidden = false
+  lastRenderedSettings = null
+  needsRenderText.classList.remove('visible')
   previewStatus.textContent = ''
-  previewStatus.classList.remove('active')
+  previewStatus.parentElement!.classList.remove('active')
   hideLoading()
 
   renderPresetList()
@@ -1342,10 +1535,15 @@ btnDisconnect.addEventListener('click', async () => {
 
 // Handle physical USB disconnect (camera unplugged)
 navigator.usb?.addEventListener('disconnect', () => {
-  if (camera?.connected === false) {
+  if (camera) {
     log('--- Camera disconnected ---')
     camera.disconnect().catch(() => {}).finally(() => resetApp())
   }
+})
+
+// Close PTP session on page unload to prevent stale sessions
+window.addEventListener('beforeunload', () => {
+  camera?.emergencyClose()
 })
 
 btnRevertPreset.addEventListener('click', () => {
@@ -1412,6 +1610,9 @@ btnSavePresets.addEventListener('click', async () => {
   }
 
   if (allOk) {
+    // Remember which slot was selected so we can re-select after rescan
+    const prevSlotIdx = activeId ? store.slotMap.indexOf(activeId) : -1
+
     // Re-scan to refresh store from actual camera state
     showLoading('Verifying...')
     log('Re-scanning presets to confirm...')
@@ -1419,9 +1620,17 @@ btnSavePresets.addEventListener('click', async () => {
       const scanned = await camera.scanPresets()
       store = createStoreFromScan(scanned)
       workingCopies.clear()
-      activeId = null
-      renderPresetList()
-      updatePresetBar()
+
+      // Re-select the preset at the same slot (IDs change across rescans)
+      const newId = prevSlotIdx >= 0 ? store.slotMap[prevSlotIdx] : null
+      if (newId && store.presets.has(newId)) {
+        selectPreset(newId, false)
+      } else {
+        activeId = null
+        renderPresetList()
+        updatePresetBar()
+      }
+
       log('Save complete')
     } catch (err) {
       log(`Re-scan error: ${err}`)
@@ -1538,7 +1747,7 @@ btnSelectRaf.addEventListener('click', async () => {
 })
 
 // Render button — manual trigger when auto-render is off
-btnRender.addEventListener('click', () => doPreview())
+btnRender.addEventListener('click', () => doPreview(true))
 
 // Auto-render toggle — show/hide render bar
 autoRenderCheckbox.addEventListener('change', () => {

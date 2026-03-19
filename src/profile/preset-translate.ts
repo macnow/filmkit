@@ -45,7 +45,7 @@ export interface PresetSnapshot {
   readonly values: Readonly<PresetUIValues>
 }
 
-const DEFAULTS: PresetUIValues = {
+export const PRESET_DEFAULTS: Readonly<PresetUIValues> = {
   filmSimulation: 0,
   dynamicRange: 0,
   grainEffect: 0,
@@ -112,7 +112,7 @@ function decodeNR(raw: number): number {
 
 /** Translate camera preset settings to UI-compatible values */
 export function translatePresetToUI(settings: RawProp[]): PresetUIValues {
-  const v = { ...DEFAULTS }
+  const v = { ...PRESET_DEFAULTS }
 
   const filmSim = prop(settings, 0xD192)
   if (filmSim !== null) v.filmSimulation = filmSim

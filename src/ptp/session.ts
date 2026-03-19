@@ -87,6 +87,8 @@ export class FujiCamera {
   private log: LogFn
   private sessionOpen = false
 
+  /** Camera model name from PTP DeviceInfo (e.g. "X100VI") */
+  modelName = ''
   /** Base profile from the camera (cached after first RAF upload) */
   baseProfile: Uint8Array | null = null
   /** Whether a RAF is currently loaded in camera memory */
@@ -157,7 +159,24 @@ export class FujiCamera {
     const ok = await this.transport.connect()
     if (!ok) return false
 
-    return this.openSession()
+    if (!await this.openSession()) return false
+
+    // Fetch model name from PTP DeviceInfo
+    try {
+      const info = await this.getDeviceInfo()
+      this.modelName = info.model
+    } catch {
+      // Non-fatal — fall back to USB product name
+      this.modelName = this.transport.device?.productName ?? 'Unknown camera'
+    }
+    return true
+  }
+
+  /** Best-effort session close for page unload — fire and forget, no await. */
+  emergencyClose(): void {
+    if (this.sessionOpen) {
+      this.transport.fireCloseSession()
+    }
   }
 
   /** Disconnect (close session + release USB). Cancels all pending queue items. */
@@ -182,19 +201,24 @@ export class FujiCamera {
     }
 
     if (code === PTPResp.SessionAlreadyOpen) {
-      this.log('Session already open, closing and reopening...')
+      // Stale session from a previous page load. CloseSession clears the
+      // camera's PTP state, but the transport is left confused (transaction
+      // IDs out of sync). Reset the USB connection after closing so the
+      // retry starts with a clean transport — same as a manual reconnect.
+      this.log('Stale session detected, closing and resetting...')
       try {
         await this.transport.sendCommand(PTPOp.CloseSession)
       } catch {
-        // Ignore
+        // Ignore — best-effort
       }
+      await this.transport.resetConnection()
       const retry = await this.transport.sendCommand(PTPOp.OpenSession, [sessionId])
       if (retry.code === PTPResp.OK) {
         this.sessionOpen = true
         this.log('Session opened')
         return true
       }
-      this.log(`OpenSession failed after close: ${respName(retry.code)}`)
+      this.log(`OpenSession failed after reset: ${respName(retry.code)}`)
       return false
     }
 

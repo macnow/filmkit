@@ -8,7 +8,7 @@
  * - Endpoint discovery uses the WebUSB interface model, not iteration
  */
 
-import { FUJI_VENDOR_ID } from './constants.ts'
+import { FUJI_VENDOR_ID, PTPOp } from './constants.ts'
 import { packContainer, unpackContainer, containerLength, type PTPContainerData } from './container.ts'
 import { ContainerType } from './constants.ts'
 
@@ -87,6 +87,26 @@ export class USBTransport {
     }
     this.device = null
     this.log('Disconnected')
+  }
+
+  /**
+   * Reset the USB connection without losing the device reference.
+   * Releases interface, closes, reopens, reclaims — clears stale PTP state.
+   */
+  async resetConnection(): Promise<void> {
+    if (!this.device) return
+    try {
+      await this.device.releaseInterface(0)
+      await this.device.close()
+    } catch {
+      // Ignore
+    }
+    this._transactionId = 0
+    await this.device.open()
+    await this.device.selectConfiguration(1)
+    await this.device.claimInterface(0)
+    this.findEndpoints()
+    this.log('USB connection reset')
   }
 
   /** Find bulk IN and OUT endpoints on interface 0 */
@@ -240,6 +260,25 @@ export class USBTransport {
     }
 
     return { code: resp.code, params: resp.params }
+  }
+
+  /**
+   * Best-effort CloseSession for page unload — fire and forget.
+   * Sends the command packet without waiting for a response.
+   */
+  fireCloseSession(): void {
+    if (!this.device) return
+    try {
+      this.send({
+        type: ContainerType.Command,
+        code: PTPOp.CloseSession,
+        transactionId: this.nextTransactionId(),
+        params: [],
+        data: new Uint8Array(0),
+      })
+    } catch {
+      // Best-effort — ignore errors
+    }
   }
 
   // -- Private helpers --

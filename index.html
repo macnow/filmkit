@@ -165,24 +165,55 @@
 
     .preview-overlay {
       position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      background: transparent;
+      transition: background 0.15s;
+    }
+    .preview-overlay.active {
+      background: rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+    }
+    .preview-status {
+      font-family: var(--mono);
+      font-size: var(--mono-l);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0.5rem 1rem;
+      min-height: 1.8rem;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .preview-overlay.active .preview-status {
+      color: var(--accent);
+      opacity: 1;
+    }
+    .needs-render {
+      position: absolute;
       top: 0;
       left: 0;
       right: 0;
-      z-index: 10;
+      z-index: 5;
       display: flex;
       justify-content: center;
     }
-    .preview-status {
+    .needs-render-text {
       font-family: var(--mono);
       font-size: var(--mono-m);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
       padding: 0.5rem 1rem;
-      min-height: 1.8rem;
+      opacity: 0;
+      transition: opacity 0.15s;
     }
-    .preview-status.active {
-      color: var(--accent);
+    .needs-render-text.visible {
+      opacity: 1;
     }
 
     /* ================================================================
@@ -345,10 +376,13 @@
       gap: 0.35rem;
       align-items: center;
     }
-    #camera-name {
+    .camera-name {
       font-size: var(--font-m);
       color: var(--text-dim);
-      margin-left: 0.15rem;
+      margin-bottom: 0.35rem;
+    }
+    .camera-name:empty {
+      display: none;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -776,6 +810,21 @@
       white-space: nowrap;
     }
     .recent-file.active .recent-name { color: var(--text-bright); }
+    .recent-delete {
+      font-size: var(--font-l);
+      line-height: 1;
+      padding: 0 0.3rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.1s, color 0.1s;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+    .recent-file:hover .recent-delete { opacity: 1; }
+    .recent-delete:hover { color: #c88; }
     /* Footer */
     .app-footer {
       padding: 0.5rem 1rem;
@@ -826,7 +875,7 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 1.5rem;
-      max-width: 340px;
+      max-width: 440px;
       width: 90%;
       display: flex;
       flex-direction: column;
@@ -843,6 +892,108 @@
       line-height: 1.5;
     }
     .dialog-actions {
+      display: flex;
+      gap: 0.4rem;
+      justify-content: flex-end;
+    }
+
+    /* ================================================================
+       IMPORT DROPDOWN + PASTE OVERLAY
+       ================================================================ */
+
+    .import-dropdown-anchor { position: relative; flex: 1; }
+
+    .import-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 0.15rem;
+    }
+    .import-dropdown button {
+      display: block;
+      width: 100%;
+      padding: 0.35rem 0.5rem;
+      font-size: var(--font-s);
+      color: var(--text-dim);
+      background: none;
+      border: none;
+      border-radius: 0;
+      text-align: left;
+      cursor: pointer;
+    }
+    .import-dropdown button:hover {
+      background: var(--accent-glow);
+      color: var(--text-bright);
+    }
+
+    .paste-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .paste-overlay.visible { display: flex; }
+
+    .paste-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.5rem;
+      max-width: 440px;
+      width: 90%;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .paste-title {
+      font-size: var(--font-xl);
+      font-weight: 500;
+      color: var(--text-bright);
+    }
+    .paste-name-input {
+      font-family: var(--sans);
+      font-size: var(--font-l);
+      padding: 0.4rem 0.5rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      outline: none;
+    }
+    .paste-name-input:focus { border-color: var(--accent-dim); }
+    .paste-name-input::placeholder { color: var(--text-muted); }
+
+    .paste-textarea {
+      font-family: var(--mono);
+      font-size: var(--mono-m);
+      line-height: 1.5;
+      padding: 0.5rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      resize: vertical;
+      min-height: 10rem;
+      outline: none;
+    }
+    .paste-textarea:focus { border-color: var(--accent-dim); }
+    .paste-textarea::placeholder { color: var(--text-muted); }
+
+    .paste-hint {
+      font-size: var(--font-s);
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .paste-actions {
       display: flex;
       gap: 0.4rem;
       justify-content: flex-end;
@@ -960,7 +1111,7 @@
         padding: 0.5rem 0.6rem;
       }
 
-      .preset-delete {
+      .preset-delete, .recent-delete {
         opacity: 1; /* always visible on touch — no hover */
         padding: 0 0.5rem;
         min-height: 42px;
@@ -1062,6 +1213,25 @@
     <div class="loading-text" id="loading-text">Connecting...</div>
   </div>
 
+  <!-- Paste import overlay -->
+  <div class="paste-overlay" id="paste-overlay">
+    <div class="paste-box">
+      <div class="paste-title">Import from Text</div>
+      <input type="text" class="paste-name-input" id="paste-name" placeholder="Preset name">
+      <textarea class="paste-textarea" id="paste-text" rows="12"
+        placeholder="Paste preset text or .filmkit JSON here..."></textarea>
+      <div class="paste-hint">
+        Accepts .filmkit JSON or recipe text (e.g. from
+        <a href="https://fujixweekly.com/" target="_blank" rel="noopener" style="color:var(--accent)">Fuji X Weekly</a>).
+        Fields that can't be parsed will be skipped.
+      </div>
+      <div class="paste-actions">
+        <button id="paste-cancel">Cancel</button>
+        <button id="paste-import" class="primary">Import</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Reusable dialog overlay -->
   <div class="dialog-overlay" id="dialog-overlay">
     <div class="dialog-box">
@@ -1092,10 +1262,10 @@
         <!-- Connection -->
         <div class="section">
           <div class="section-title">Camera <span id="status" class="status-badge off">Disconnected</span></div>
+          <div id="camera-name" class="camera-name"></div>
           <div class="connection-row">
             <button id="btn-connect" class="primary">Connect</button>
             <button id="btn-disconnect" class="danger" disabled>Disconnect</button>
-            <span id="camera-name"></span>
           </div>
         </div>
 
@@ -1129,13 +1299,16 @@
          CANVAS — photo preview
          ============================================================ -->
     <div class="canvas-area">
+      <div class="needs-render">
+        <div id="needs-render-text" class="needs-render-text">Needs rendering</div>
+      </div>
       <div class="preview-overlay">
         <div id="preview-status" class="preview-status"></div>
       </div>
 
       <div class="canvas-empty" id="canvas-empty">
         <em class="icon">&#9649;</em>
-        <p>Load a RAF file to begin</p>
+        <p id="canvas-empty-text">Connect to camera to begin</p>
       </div>
 
       <div id="result-panel">
