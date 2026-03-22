@@ -36,10 +36,18 @@ export class USBTransport {
    * Request and open a Fujifilm camera.
    * MUST be called from a user gesture (click handler).
    */
-  async connect(): Promise<boolean> {
+  /** Connection error types for caller-side UI handling */
+  static readonly ConnectError = {
+    Cancelled: 'cancelled',
+    Security: 'security',
+    InterfaceBusy: 'interface-busy',
+    Other: 'other',
+  } as const
+
+  async connect(): Promise<{ ok: true } | { ok: false, error: string, detail: string }> {
     if (!USBTransport.isSupported()) {
       this.log('WebUSB not supported in this browser (need Chromium-based)')
-      return false
+      return { ok: false, error: 'other', detail: 'WebUSB not supported' }
     }
 
     try {
@@ -60,20 +68,21 @@ export class USBTransport {
       this.findEndpoints()
       this.log(`Endpoints: OUT=${this.epOut}, IN=${this.epIn}`)
 
-      return true
+      return { ok: true }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'NotFoundError') {
         this.log('No camera selected')
+        return { ok: false, error: 'cancelled', detail: 'No camera selected' }
       } else if (err instanceof DOMException && err.name === 'SecurityError') {
         this.log('WebUSB blocked — needs HTTPS or localhost')
+        return { ok: false, error: 'security', detail: 'WebUSB blocked — needs HTTPS or localhost' }
       } else if (err instanceof DOMException && err.name === 'NetworkError') {
-        this.log('Failed to claim interface — kernel driver may have the device')
-        this.log('On Linux, add udev rule: SUBSYSTEM=="usb", ATTR{idVendor}=="04cb", MODE="0666"')
-        this.log('Then: sudo udevadm control --reload-rules && sudo udevadm trigger')
+        this.log('Failed to claim USB interface — another application may have the device')
+        return { ok: false, error: 'interface-busy', detail: String(err) }
       } else {
         this.log(`Connection failed: ${err}`)
+        return { ok: false, error: 'other', detail: String(err) }
       }
-      return false
     }
   }
 

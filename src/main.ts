@@ -1504,12 +1504,27 @@ btnConnect.addEventListener('click', async () => {
   log('--- Connecting ---')
 
   camera = new FujiCamera(log)
-  const ok = await camera.connect()
+  const result = await camera.connect()
 
-  if (!ok) {
+  if (!result.ok) {
     camera = null
     hideLoading()
     updateUI()
+
+    // Show platform-aware error dialog for interface-busy errors
+    if (result.error === 'interface-busy') {
+      const isMac = /Mac/i.test(navigator.platform) || /Mac/i.test(navigator.userAgent)
+      const message = isMac
+        ? 'Another application is using the camera\'s USB connection.<br><br>'
+          + '<b>To fix this on macOS:</b><br>'
+          + '1. Quit any camera apps (X RAW Studio, Capture One, Photos)<br>'
+          + '2. Unplug and re-plug the camera, then try connecting again<br>'
+          + '3. If that doesn\'t work, run in Terminal:<br>'
+          + '<code style="font-size:var(--mono-m);color:var(--accent)">killall ptpcamerad</code><br>'
+          + 'then try connecting again immediately'
+        : 'Failed to claim the USB interface. Another application or driver may be using the camera'
+      await showDialog('Connection Failed', message, [{ label: 'OK', primary: true }], true)
+    }
     return
   }
 

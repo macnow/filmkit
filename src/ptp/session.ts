@@ -155,11 +155,11 @@ export class FujiCamera {
   }
 
   /** Connect to camera (opens USB device + PTP session) */
-  async connect(): Promise<boolean> {
-    const ok = await this.transport.connect()
-    if (!ok) return false
+  async connect(): Promise<{ ok: true } | { ok: false, error: string }> {
+    const result = await this.transport.connect()
+    if (!result.ok) return result
 
-    if (!await this.openSession()) return false
+    if (!await this.openSession()) return { ok: false, error: 'other' }
 
     // Fetch model name from PTP DeviceInfo
     try {
@@ -169,7 +169,7 @@ export class FujiCamera {
       // Non-fatal — fall back to USB product name
       this.modelName = this.transport.device?.productName ?? 'Unknown camera'
     }
-    return true
+    return { ok: true }
   }
 
   /** Best-effort session close for page unload — fire and forget, no await. */

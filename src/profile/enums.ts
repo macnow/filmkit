@@ -20,11 +20,10 @@ export const FilmSim = {
   AcrosR:       0x0E,
   AcrosG:       0x0F,
   Eterna:       0x10,
-  EternaBleach: 0x11,
-  // X-Processor 5 additions (values TBD — may need testing)
-  NostalgicNeg: 0x12,
-  RealaAce:     0x13,
-  ClassicNeg:   0x14,
+  ClassicNeg:   0x11,
+  EternaBleach: 0x12,
+  NostalgicNeg: 0x13,
+  RealaAce:     0x14,
 } as const
 
 /** Film simulations that are monochrome (B&W) — Color adjustment is not applicable */
