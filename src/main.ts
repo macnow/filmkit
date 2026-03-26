@@ -1,6 +1,6 @@
 import { FujiCamera, CancelledError, type RawProp } from './ptp/session.ts'
 import { USBTransport } from './ptp/transport.ts'
-import { formatPresetValue } from './ptp/constants.ts'
+import { formatPresetValue, FujiPropNames } from './ptp/constants.ts'
 import {
   FilmSimLabels,
   MONOCHROME_SIMS,
@@ -1531,7 +1531,8 @@ btnConnect.addEventListener('click', async () => {
   showLoading('Loading presets...')
   try {
     const scanned = await camera.scanPresets()
-    if (scanned.length === 0) {
+    if (scanned.length === 0 && camera.supportedProperties.has(0xD18C)) {
+      // Camera advertises preset support but returned nothing — wrong USB mode
       hideLoading()
       log('No presets found — camera may be in wrong USB mode')
       await showDialog(
@@ -1540,6 +1541,18 @@ btnConnect.addEventListener('click', async () => {
         + 'On your camera, go to:<br>'
         + '<b>Network/USB Setting → Connection Mode → USB Raw Conv./Backup Restore</b><br><br>'
         + 'Then disconnect and reconnect.',
+        [{ label: 'OK', primary: true }],
+        true,
+      )
+    } else if (scanned.length === 0) {
+      // Camera doesn't support preset properties — still allow RAF conversion
+      hideLoading()
+      log(`${camera.modelName}: preset editing not supported — RAW conversion available`)
+      await showDialog(
+        'Limited Support',
+        `Connected to <b>${camera.modelName}</b>. This camera does not support preset editing via USB, `
+        + 'but RAW conversion is available.<br><br>'
+        + 'You can load a RAF file and convert it using the controls on the right.',
         [{ label: 'OK', primary: true }],
         true,
       )
@@ -1773,6 +1786,14 @@ btnScanProps.addEventListener('click', async () => {
       }
     }
     log(`--- ${info.operations.length} operations ---`)
+
+    log('--- Supported Properties (DeviceInfo) ---')
+    for (const pid of info.properties) {
+      const hex = '0x' + pid.toString(16).toUpperCase().padStart(4, '0')
+      const name = FujiPropNames[pid]
+      log(`  ${hex}${name ? ' ' + name : ''}`)
+    }
+    log(`--- ${info.properties.length} properties ---`)
 
     const props = await camera.scanProperties()
     log('--- Camera Properties ---')

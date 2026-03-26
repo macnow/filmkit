@@ -145,7 +145,7 @@ export const FUJI_VENDOR_ID = 0x04CB
 
 export const FUJI_PRODUCT_IDS = [
   0x02E3, // X-T30
-  0x02E5, // X-T3
+  0x02E5, // X100V
   0x02E7, // X-T4
   0x0305, // X100VI
 ]

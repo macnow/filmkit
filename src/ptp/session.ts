@@ -89,6 +89,8 @@ export class FujiCamera {
 
   /** Camera model name from PTP DeviceInfo (e.g. "X100VI") */
   modelName = ''
+  /** Supported device property IDs from PTP DeviceInfo */
+  supportedProperties: Set<number> = new Set()
   /** Base profile from the camera (cached after first RAF upload) */
   baseProfile: Uint8Array | null = null
   /** Whether a RAF is currently loaded in camera memory */
@@ -161,10 +163,11 @@ export class FujiCamera {
 
     if (!await this.openSession()) return { ok: false, error: 'other' }
 
-    // Fetch model name from PTP DeviceInfo
+    // Fetch model name + supported properties from PTP DeviceInfo
     try {
       const info = await this.getDeviceInfo()
       this.modelName = info.model
+      this.supportedProperties = new Set(info.properties)
     } catch {
       // Non-fatal — fall back to USB product name
       this.modelName = this.transport.device?.productName ?? 'Unknown camera'
@@ -421,6 +424,12 @@ export class FujiCamera {
    */
   async scanPresets(): Promise<PresetData[]> {
     return this.enqueue('default', async () => {
+      // Check if camera supports preset properties (X-Processor 4 may not)
+      if (this.supportedProperties.size > 0 && !this.supportedProperties.has(0xD18C)) {
+        this.log('Camera does not advertise preset properties (D18C) — skipping preset scan')
+        return []
+      }
+
       // Save current slot so we can restore it
       const origSlot = await this.readProp(0xD18C)
       const origSlotVal = origSlot && typeof origSlot.value === 'number' ? origSlot.value : 1
@@ -431,6 +440,10 @@ export class FujiCamera {
         const ok = await this.writePropU16(0xD18C, slot)
         if (!ok) {
           this.log(`Failed to select slot ${slot}`)
+          if (slot === 1) {
+            this.log('Slot selection not supported — aborting preset scan')
+            break
+          }
           continue
         }
 
