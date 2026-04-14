@@ -40,13 +40,22 @@ export interface ConversionParams {
 
 /**
  * Native d185 profile field indices (camera's 625-byte format).
- * Confirmed via X100VI test images (2026-03). Uses DIFFERENT layout from rawji.
- * Encoding matches preset properties: 1-indexed effects, flat grain enum, raw DR%.
+ *
+ * The buffer is 625 bytes with 29 params (numParams=29).
+ * Our formula: off = 625 - 29*4 = 509  (params counted from end of buffer).
+ * libfuji (petabyt/fp) puts params at byte 0x201=513 in a 629-byte buffer.
+ * Difference: 513 - 509 = 4 bytes = 1 param slot.
+ * To match libfuji index N, use our index N+1.
+ *
+ * Verified: base[4]=2 = FINE image quality (libfuji index 3), so libfuji ExposureBias
+ * (index 4) = our index 5. All other indices follow the same +1 offset.
  */
 const NativeIdx = {
-  ExposureBias:      4,
-  DynamicRange:      6,   // raw percentage: 100/200/400
-  WideDRange:        7,
+  ExposureBias:      5,   // libfuji idx 4 → our idx 5 (base=0 for neutral EV)
+  // DynamicRange at our idx 6 = libfuji idx 5 — but DR is locked to capture value
+  // (cannot be changed in RAW conversion for DR100 shots, causes color corruption).
+  // Do NOT write DynamicRange in patchProfile.
+  WideDRange:        7,   // libfuji idx 6 → our idx 7
   FilmSimulation:    8,
   GrainEffect:       9,   // flat enum: 1=Off 2=WkSm 3=StrSm 4=WkLg 5=StrLg
   ColorChrome:      10,   // 1-indexed: 1=Off 2=Weak 3=Strong
@@ -73,9 +82,6 @@ const GRAIN_TO_NATIVE: Record<number, number> = {
   0x0103: 5,  // StrongLarge
 }
 
-/** UI DR enum → native raw percentage */
-const DR_TO_NATIVE: Record<number, number> = { 1: 100, 2: 200, 3: 400 }
-
 /**
  * Patch the camera's native base profile with user changes.
  *
@@ -97,7 +103,8 @@ export function patchProfile(
 
   if (changes.filmSimulation !== undefined) set(NativeIdx.FilmSimulation, changes.filmSimulation)
   if (changes.exposureBias !== undefined)   set(NativeIdx.ExposureBias, changes.exposureBias)
-  if (changes.dynamicRange !== undefined)   set(NativeIdx.DynamicRange, DR_TO_NATIVE[changes.dynamicRange] ?? 0)
+  // DynamicRange intentionally NOT written: DR is determined at capture time.
+  // Writing it to D185 for photos shot at DR100 causes color corruption (green/yellow shift).
   if (changes.wideDRange !== undefined)     set(NativeIdx.WideDRange, changes.wideDRange)
 
   // Grain: UI combined value → native flat enum

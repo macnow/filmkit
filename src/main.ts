@@ -547,7 +547,8 @@ for (const [key, s] of Object.entries(sliders)) {
     if (key === 'wbColorTemp') {
       s.display.textContent = val + 'K'
     } else if (key === 'exposure') {
-      s.display.textContent = (val >= 0 ? '+' : '') + val.toFixed(1)
+      const ev = val / 3
+      s.display.textContent = (ev >= 0 ? '+' : '') + ev.toFixed(2)
     } else {
       s.display.textContent = (val >= 0 ? '+' : '') + val.toString()
     }
@@ -602,7 +603,7 @@ function getSettings(): ConversionParams {
     sharpness:      parseInt(sliders.sharpness.input.value),
     noiseReduction: parseInt(sliders.noiseReduction.input.value),
     clarity:        parseInt(sliders.clarity.input.value),
-    exposureBias:   Math.round(parseFloat(sliders.exposure.input.value) * 1000),
+    exposureBias:   Math.round(parseInt(sliders.exposure.input.value) / 3 * 1000),
     wbShiftR:       parseInt(sliders.wbShiftR.input.value),
     wbShiftB:       parseInt(sliders.wbShiftB.input.value),
   }

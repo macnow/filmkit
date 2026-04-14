@@ -237,7 +237,7 @@ export function cameraProfileToUIValues(profileData: Uint8Array): PresetUIValues
     sharpness:        decodeTone(p(19)),
     noiseReduction:   decodeNR(p(20)),
     clarity:          decodeTone(p(27)),
-    exposure:         p(4) / 1000,
+    exposure:         p(5) / 1000,
     dRangePriority:   p(7),
     monoWC:           0, // not in d185 profile (only in preset properties)
     monoMG:           0,
