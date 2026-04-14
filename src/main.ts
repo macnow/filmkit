@@ -603,7 +603,7 @@ function getSettings(): ConversionParams {
     sharpness:      parseInt(sliders.sharpness.input.value),
     noiseReduction: parseInt(sliders.noiseReduction.input.value),
     clarity:        parseInt(sliders.clarity.input.value),
-    exposureBias:   Math.round(parseInt(sliders.exposure.input.value) / 3 * 1000),
+    exposureBias:   (() => { const v = Math.round(parseInt(sliders.exposure.input.value) / 3 * 1000); console.log('[EV] slider thirds=', sliders.exposure.input.value, '→ millistops=', v); return v })(),
     wbShiftR:       parseInt(sliders.wbShiftR.input.value),
     wbShiftB:       parseInt(sliders.wbShiftB.input.value),
   }
@@ -662,7 +662,7 @@ function getCurrentUIValues(): PresetUIValues {
     sharpness: parseInt(sliders.sharpness.input.value),
     noiseReduction: parseInt(sliders.noiseReduction.input.value),
     clarity: parseInt(sliders.clarity.input.value),
-    exposure: parseFloat(sliders.exposure.input.value),
+    exposure: parseInt(sliders.exposure.input.value) / 3,
     dRangePriority: dRangePriSelect.value ? parseInt(dRangePriSelect.value) : 0,
     monoWC: parseInt(sliders.monoWC.input.value),
     monoMG: parseInt(sliders.monoMG.input.value),
@@ -689,7 +689,7 @@ function applyToUI(name: string, vals: Readonly<PresetUIValues>) {
   setSlider('sharpness', vals.sharpness)
   setSlider('noiseReduction', vals.noiseReduction)
   setSlider('clarity', vals.clarity)
-  setSlider('exposure', vals.exposure)
+  setSlider('exposure', Math.round(vals.exposure * 3))
   setSlider('wbColorTemp', vals.wbColorTemp)
   setSlider('wbShiftR', vals.wbShiftR)
   setSlider('wbShiftB', vals.wbShiftB)
