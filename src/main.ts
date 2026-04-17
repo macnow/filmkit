@@ -1953,33 +1953,61 @@ compareToggle.addEventListener('click', () => setCompareView(!showingOriginal))
 let currentFileHandle: FileSystemFileHandle | null = null
 
 btnSelectRaf.addEventListener('click', async () => {
-  try {
-    const [handle] = await window.showOpenFilePicker({
-      types: [{
-        description: 'Fuji RAW files',
-        accept: { 'image/x-fuji-raf': ['.raf', '.RAF'] },
-      }],
-    })
+  if (typeof window.showOpenFilePicker === 'function') {
+    // File System Access API — Chrome/Edge desktop (supports recent files)
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{
+          description: 'Fuji RAW files',
+          accept: { 'image/x-fuji-raf': ['.raf', '.RAF'] },
+        }],
+      })
 
-    const file = await handle.getFile()
-    rafFileName = file.name
-    currentFileHandle = handle
-    log(`Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
+      const file = await handle.getFile()
+      rafFileName = file.name
+      currentFileHandle = handle
+      log(`Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
 
-    const data = await file.arrayBuffer()
-    rafData = data
+      const data = await file.arrayBuffer()
+      rafData = data
 
-    const header = new TextDecoder().decode(new Uint8Array(data, 0, 15))
-    if (!header.startsWith('FUJIFILMCCD-RAW')) {
-      log('Warning: file may not be a valid RAF')
-      return
+      const header = new TextDecoder().decode(new Uint8Array(data, 0, 15))
+      if (!header.startsWith('FUJIFILMCCD-RAW')) {
+        log('Warning: file may not be a valid RAF')
+        return
+      }
+
+      await doLoadRaf()
+    } catch (err) {
+      // User cancelled the picker — not an error
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      log(`File open error: ${err}`)
     }
+  } else {
+    // Fallback: <input type="file"> — iOS Safari, Firefox, any browser
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.raf,.RAF'
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0]
+      if (!file) return
 
-    await doLoadRaf()
-  } catch (err) {
-    // User cancelled the picker — not an error
-    if (err instanceof DOMException && err.name === 'AbortError') return
-    log(`File open error: ${err}`)
+      rafFileName = file.name
+      currentFileHandle = null
+      log(`Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`)
+
+      const data = await file.arrayBuffer()
+      rafData = data
+
+      const header = new TextDecoder().decode(new Uint8Array(data, 0, 15))
+      if (!header.startsWith('FUJIFILMCCD-RAW')) {
+        log('Warning: file may not be a valid RAF')
+        return
+      }
+
+      await doLoadRaf()
+    })
+    input.click()
   }
 })
 
