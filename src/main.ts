@@ -264,7 +264,7 @@ function updateUI() {
   // Mode indicator — shown once we've determined the mode
   if (detectedRouterUrl !== null || USBTransport.isSupported()) {
     modeRow.hidden = false
-    modeBadge.textContent = routerBaseUrl ? 'Router' : 'WebUSB'
+    modeBadge.textContent = routerBaseUrl ? 'Router' : 'USB'
     // Switch button: only when disconnected, and only if the target mode is viable
     const canSwitchToUsb = !routerBaseUrl && !!detectedRouterUrl
     const canSwitchToRouter = !!routerBaseUrl && USBTransport.isSupported()
