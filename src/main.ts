@@ -266,8 +266,8 @@ function updateUI() {
     modeRow.hidden = false
     modeBadge.textContent = routerBaseUrl ? 'Router' : 'USB'
     // Switch button: only when disconnected, and only if the target mode is viable
-    const canSwitchToUsb = !routerBaseUrl && !!detectedRouterUrl
-    const canSwitchToRouter = !!routerBaseUrl && USBTransport.isSupported()
+    const canSwitchToUsb = !!routerBaseUrl && USBTransport.isSupported()
+    const canSwitchToRouter = !routerBaseUrl && !!detectedRouterUrl
     btnSwitchMode.hidden = connected || (!canSwitchToUsb && !canSwitchToRouter)
     btnSwitchMode.textContent = routerBaseUrl ? 'Switch to WebUSB' : 'Switch to Router'
   }
