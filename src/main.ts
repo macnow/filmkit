@@ -1,5 +1,6 @@
 import { FujiCamera, CancelledError, type RawProp } from './ptp/session.ts'
 import { USBTransport } from './ptp/transport.ts'
+import { RouterCamera, detectRouterBaseURL } from './router-camera.ts'
 import { formatPresetValue, FujiPropNames } from './ptp/constants.ts'
 import {
   FilmSimLabels,
@@ -126,7 +127,8 @@ const sliders = {
 // State
 // ==========================================================================
 
-let camera: FujiCamera | null = null
+let camera: FujiCamera | RouterCamera | null = null
+let routerBaseUrl: string | null = null
 let rafData: ArrayBuffer | null = null
 let rafFileName = ''
 let resultBlobUrl: string | null = null
@@ -248,6 +250,12 @@ function updateUI() {
   btnDisconnect.disabled = !connected
   btnScanProps.disabled = !connected
   btnSelectRaf.disabled = !connected
+
+  // Router mode: no WebUSB required
+  if (routerBaseUrl) {
+    btnConnect.disabled = connected
+    browserWarning.hidden = true
+  }
 
   // Show render button when RAF is loaded and auto-render is off
   btnRender.hidden = !rafReady || autoRenderCheckbox.checked
@@ -851,6 +859,13 @@ function makePresetActions(): HTMLElement {
     linkBtn.addEventListener('click', (ev) => { ev.stopPropagation(); dropdown.remove(); copyShareLink() })
     dropdown.appendChild(linkBtn)
 
+    if (store.slotCount > 0) {
+      const allBtn = document.createElement('button')
+      allBtn.textContent = 'Export All (Camera)'
+      allBtn.addEventListener('click', (ev) => { ev.stopPropagation(); dropdown.remove(); exportAllCameraPresets() })
+      dropdown.appendChild(allBtn)
+    }
+
     exportAnchor.appendChild(dropdown)
 
     const dismiss = (ev: MouseEvent) => {
@@ -1100,6 +1115,52 @@ function exportPreset() {
   URL.revokeObjectURL(url)
 }
 
+/** Export all camera presets as individual .filmkit files. */
+function exportAllCameraPresets() {
+  if (store.slotCount === 0) return
+  let count = 0
+
+  for (let i = 0; i < store.slotCount; i++) {
+    const pid = store.slotMap[i]
+    if (!pid) continue
+
+    const wc = workingCopies.get(pid)
+    const preset = store.presets.get(pid)
+    const name = wc?.name ?? preset?.name ?? `C${i + 1}`
+    const values = wc?.values ?? preset?.values
+    if (!values) continue
+
+    const data = {
+      filmkit: 1,
+      name,
+      values: { ...values },
+      _labels: {
+        filmSimulation: FilmSimLabels[values.filmSimulation] ?? 'Unknown',
+        whiteBalance: WBModeLabels[values.whiteBalance] ?? 'Unknown',
+        dynamicRange: DynRangeLabels[values.dynamicRange] ?? 'Auto',
+        grainEffect: grainLabel(values.grainEffect),
+        colorChrome: ColorChromeLabels[values.colorChrome] ?? 'Unknown',
+        colorChromeFxBlue: ColorChromeFxBlueLabels[values.colorChromeFxBlue] ?? 'Unknown',
+        smoothSkin: SmoothSkinLabels[values.smoothSkin] ?? 'Unknown',
+        dRangePriority: DRangePriorityLabels[values.dRangePriority] ?? 'Unknown',
+      },
+    }
+
+    const json = JSON.stringify(data, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, '').trim() || `C${i + 1}`
+    a.download = `C${i + 1}-${safeName}.filmkit`
+    a.click()
+    URL.revokeObjectURL(url)
+    count++
+  }
+
+  log(`Exported ${count} camera preset${count !== 1 ? 's' : ''}`)
+}
+
 /** Copy a shareable link for the active preset to clipboard. */
 function copyShareLink() {
   if (!activeId) return
@@ -1146,27 +1207,45 @@ function importFromJSON(data: unknown, fallbackName: string): { name: string } |
   return { name }
 }
 
-/** Import a .filmkit or .json file as a new local preset. */
+/** Import one or more .filmkit / .json files as local presets. */
 async function importFromFile() {
   const input = document.createElement('input')
   input.type = 'file'
   input.accept = '.filmkit,.json'
+  input.multiple = true
 
   input.addEventListener('change', async () => {
-    const file = input.files?.[0]
-    if (!file) return
+    const files = input.files
+    if (!files || files.length === 0) return
 
-    try {
-      const text = await file.text()
-      const data = JSON.parse(text)
-      const result = importFromJSON(data, file.name.replace(/\.(filmkit|json)$/i, ''))
-      if ('error' in result) {
-        await showDialog('Import Error', result.error, [{ label: 'OK', primary: true }])
-      } else {
-        await showDialog('Preset Imported', `"${result.name}" has been added to your local presets.`, [{ label: 'OK', primary: true }])
+    const imported: string[] = []
+    const errors: string[] = []
+
+    for (const file of files) {
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        const result = importFromJSON(data, file.name.replace(/\.(filmkit|json)$/i, ''))
+        if ('error' in result) {
+          errors.push(`${file.name}: ${result.error}`)
+        } else {
+          imported.push(result.name)
+        }
+      } catch {
+        errors.push(`${file.name}: Failed to parse.`)
       }
-    } catch {
-      await showDialog('Import Error', 'Failed to parse file. Expected a .filmkit or .json preset file.', [{ label: 'OK', primary: true }])
+    }
+
+    if (imported.length > 0 && errors.length === 0) {
+      await showDialog('Presets Imported',
+        `${imported.length} preset${imported.length > 1 ? 's' : ''} imported: ${imported.map(n => `"${n}"`).join(', ')}`,
+        [{ label: 'OK', primary: true }])
+    } else if (imported.length > 0) {
+      await showDialog('Import Partial',
+        `Imported ${imported.length}: ${imported.map(n => `"${n}"`).join(', ')}\n\nFailed ${errors.length}:\n${errors.join('\n')}`,
+        [{ label: 'OK', primary: true }])
+    } else {
+      await showDialog('Import Error', errors.join('\n'), [{ label: 'OK', primary: true }])
     }
   })
 
@@ -1504,6 +1583,38 @@ btnConnect.addEventListener('click', async () => {
   showLoading('Connecting...')
   log('--- Connecting ---')
 
+  // Router mode — use HTTP daemon instead of WebUSB
+  if (routerBaseUrl) {
+    camera = new RouterCamera(routerBaseUrl, log)
+    const result = await camera.connect()
+    if (!result.ok) {
+      camera = null
+      hideLoading()
+      updateUI()
+      await showDialog('Connection Failed', result.detail, [{ label: 'OK', primary: true }])
+      return
+    }
+    if (camera.rawConversionMode) {
+      showLoading('Loading presets...')
+      try {
+        const scanned = await camera.scanPresets()
+        store = createStoreFromScan(scanned)
+        workingCopies.clear()
+        activeId = null
+        renderPresetList()
+        updatePresetBar()
+      } catch (err) {
+        log(`Preset scan error: ${err}`)
+      }
+    } else {
+      log(`${camera.modelName}: connected in Browse mode — switch USB mode to enable preset editing`)
+    }
+    hideLoading()
+    startHeartbeat()
+    updateUI()
+    return
+  }
+
   camera = new FujiCamera(log)
   const result = await camera.connect()
 
@@ -1758,7 +1869,7 @@ btnSavePresets.addEventListener('click', async () => {
 })
 
 btnScanProps.addEventListener('click', async () => {
-  if (!camera) return
+  if (!camera || !(camera instanceof FujiCamera)) return
   btnScanProps.disabled = true
   btnScanProps.textContent = 'Scanning...'
 
@@ -1947,6 +2058,15 @@ function importFromUrlHash() {
   showDialog('Preset Imported', `"${name}" has been added to your local presets.`, [{ label: 'OK', primary: true }])
 }
 importFromUrlHash()
+
+// Router mode detection (async) — enables connect without WebUSB
+detectRouterBaseURL().then(url => {
+  routerBaseUrl = url
+  if (url) {
+    log(`Router mode: ${url}`)
+    updateUI()
+  }
+})
 
 log('FilmKit ready. Connect your camera to begin.')
 
