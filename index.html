@@ -406,6 +406,32 @@
       color: var(--text-dim);
       margin-bottom: 0.35rem;
     }
+    .mode-row {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.4rem;
+    }
+    .mode-label {
+      font-family: var(--mono);
+      font-size: var(--mono-s);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+    .mode-badge {
+      font-family: var(--mono);
+      font-size: var(--mono-s);
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--text-dim);
+    }
+    .mode-row .secondary {
+      font-size: var(--mono-s);
+      padding: 2px 8px;
+    }
     .camera-name:empty {
       display: none;
       overflow: hidden;
@@ -1291,6 +1317,11 @@
           <div class="connection-row">
             <button id="btn-connect" class="primary">Connect</button>
             <button id="btn-disconnect" class="danger" disabled>Disconnect</button>
+          </div>
+          <div id="mode-row" class="mode-row" hidden>
+            <span class="mode-label">Mode</span>
+            <span id="mode-badge" class="mode-badge"></span>
+            <button id="btn-switch-mode" class="secondary" hidden>Switch</button>
           </div>
         </div>
 

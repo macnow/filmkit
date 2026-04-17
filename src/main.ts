@@ -39,6 +39,9 @@ const cameraNameEl = $('camera-name')
 const btnConnect = $<HTMLButtonElement>('btn-connect')
 const btnDisconnect = $<HTMLButtonElement>('btn-disconnect')
 const browserWarning = $('browser-warning')
+const modeRow = $('mode-row')
+const modeBadge = $('mode-badge')
+const btnSwitchMode = $<HTMLButtonElement>('btn-switch-mode')
 const btnSelectRaf = $<HTMLButtonElement>('btn-select-raf')
 const recentFilesEl = $('recent-files')
 const autoRenderCheckbox = $<HTMLInputElement>('auto-render')
@@ -128,7 +131,8 @@ const sliders = {
 // ==========================================================================
 
 let camera: FujiCamera | RouterCamera | null = null
-let routerBaseUrl: string | null = null
+let routerBaseUrl: string | null = null      // currently active mode (null = WebUSB)
+let detectedRouterUrl: string | null = null  // what probe found on startup (never cleared)
 let rafData: ArrayBuffer | null = null
 let rafFileName = ''
 let resultBlobUrl: string | null = null
@@ -255,6 +259,17 @@ function updateUI() {
   if (routerBaseUrl) {
     btnConnect.disabled = connected
     browserWarning.hidden = true
+  }
+
+  // Mode indicator — shown once we've determined the mode
+  if (detectedRouterUrl !== null || USBTransport.isSupported()) {
+    modeRow.hidden = false
+    modeBadge.textContent = routerBaseUrl ? 'Router' : 'WebUSB'
+    // Switch button: only when disconnected, and only if the target mode is viable
+    const canSwitchToUsb = !routerBaseUrl && !!detectedRouterUrl
+    const canSwitchToRouter = !!routerBaseUrl && USBTransport.isSupported()
+    btnSwitchMode.hidden = connected || (!canSwitchToUsb && !canSwitchToRouter)
+    btnSwitchMode.textContent = routerBaseUrl ? 'Switch to WebUSB' : 'Switch to Router'
   }
 
   // Show render button when RAF is loaded and auto-render is off
@@ -2089,11 +2104,19 @@ importFromUrlHash()
 
 // Router mode detection (async) — enables connect without WebUSB
 detectRouterBaseURL().then(url => {
+  detectedRouterUrl = url
   routerBaseUrl = url
   if (url) {
     log(`Router mode: ${url}`)
-    updateUI()
   }
+  updateUI()
+})
+
+btnSwitchMode.addEventListener('click', () => {
+  if (camera?.connected) return
+  routerBaseUrl = routerBaseUrl ? null : detectedRouterUrl
+  log(`Switched to ${routerBaseUrl ? 'Router' : 'WebUSB'} mode`)
+  updateUI()
 })
 
 log('FilmKit ready. Connect your camera to begin.')
