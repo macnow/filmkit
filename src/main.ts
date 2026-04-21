@@ -63,8 +63,10 @@ const resultInfo = $('result-info')
 const resultDownload = $<HTMLAnchorElement>('result-download')
 const btnSaveFolder = $<HTMLButtonElement>('btn-save-folder')
 const folderNavEl = $('folder-nav')
+const btnFirst = $<HTMLButtonElement>('btn-first')
 const btnPrev = $<HTMLButtonElement>('btn-prev')
 const btnNext = $<HTMLButtonElement>('btn-next')
+const btnLast = $<HTMLButtonElement>('btn-last')
 const navInfoEl = $('nav-info')
 const photoMetaEl = $('photo-meta')
 const previewStatus = $('preview-status')
@@ -614,8 +616,10 @@ function updateFolderNav() {
   if (!hasFolder) return
   const name = rafFileName || ''
   navInfoEl.innerHTML = `${name} <span class="nav-counter">${folderIndex + 1}/${folderFiles.length}</span>`
+  btnFirst.disabled = folderIndex === 0
   btnPrev.disabled = folderIndex === 0
   btnNext.disabled = folderIndex === folderFiles.length - 1
+  btnLast.disabled = folderIndex === folderFiles.length - 1
 }
 
 async function saveToFolder() {
@@ -2184,8 +2188,10 @@ btnSelectRaf.addEventListener('click', async () => {
 
 // Folder browsing
 btnOpenFolder.addEventListener('click', openFolder)
+btnFirst.addEventListener('click', () => loadFolderFile(0))
 btnPrev.addEventListener('click', () => navigateFolder(-1))
 btnNext.addEventListener('click', () => navigateFolder(1))
+btnLast.addEventListener('click', () => loadFolderFile(folderFiles.length - 1))
 btnSaveFolder.addEventListener('click', saveToFolder)
 
 // Keyboard arrow navigation
