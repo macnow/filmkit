@@ -19,6 +19,24 @@ interface OpenFilePickerOptions {
   }>
 }
 
+interface OpenDirectoryPickerOptions {
+  mode?: 'read' | 'readwrite'
+  startIn?: FileSystemHandle | 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos'
+}
+
+interface FileSystemDirectoryHandle {
+  readonly kind: 'directory'
+  readonly name: string
+  entries(): AsyncIterableIterator<[string, FileSystemFileHandle | FileSystemDirectoryHandle]>
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>
+}
+
+interface FileSystemFileHandle {
+  readonly kind: 'file'
+  readonly name: string
+}
+
 interface Window {
   showOpenFilePicker(options?: OpenFilePickerOptions): Promise<FileSystemFileHandle[]>
+  showDirectoryPicker(options?: OpenDirectoryPickerOptions): Promise<FileSystemDirectoryHandle>
 }

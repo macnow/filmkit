@@ -43,6 +43,7 @@ const modeRow = $('mode-row')
 const modeBadge = $('mode-badge')
 const btnSwitchMode = $<HTMLButtonElement>('btn-switch-mode')
 const btnSelectRaf = $<HTMLButtonElement>('btn-select-raf')
+const btnOpenFolder = $<HTMLButtonElement>('btn-open-folder')
 const recentFilesEl = $('recent-files')
 const autoRenderCheckbox = $<HTMLInputElement>('auto-render')
 const btnRender = $<HTMLButtonElement>('btn-render')
@@ -60,6 +61,12 @@ const resultPanel = $('result-panel')
 const resultImg = $<HTMLImageElement>('result-img')
 const resultInfo = $('result-info')
 const resultDownload = $<HTMLAnchorElement>('result-download')
+const btnSaveFolder = $<HTMLButtonElement>('btn-save-folder')
+const folderNavEl = $('folder-nav')
+const btnPrev = $<HTMLButtonElement>('btn-prev')
+const btnNext = $<HTMLButtonElement>('btn-next')
+const navInfoEl = $('nav-info')
+const photoMetaEl = $('photo-meta')
 const previewStatus = $('preview-status')
 const canvasEmpty = $('canvas-empty')
 const canvasEmptyText = $('canvas-empty-text')
@@ -158,6 +165,11 @@ let store: PresetStore = createEmptyStore()
 let activeId: string | null = null
 let workingCopies: Map<string, WorkingPreset> = new Map()
 
+// Folder browsing state
+let folderHandle: FileSystemDirectoryHandle | null = null
+let folderFiles: FileSystemFileHandle[] = []
+let folderIndex = -1
+
 // Drag state — stores the preset ID being dragged
 let draggedId: string | null = null
 
@@ -254,6 +266,7 @@ function updateUI() {
   btnDisconnect.disabled = !connected
   btnScanProps.disabled = !connected
   btnSelectRaf.disabled = !connected
+  btnOpenFolder.disabled = !connected || typeof window.showDirectoryPicker !== 'function'
 
   // Router mode: no WebUSB required
   if (routerBaseUrl) {
@@ -511,6 +524,7 @@ async function doLoadRaf() {
     originalBlobUrl = URL.createObjectURL(new Blob([new Uint8Array(jpeg)], { type: 'image/jpeg' }))
 
     showResult(jpeg)
+    loadExif(data) // async, non-blocking
 
     const thumbUrl = await generateThumbnail(jpeg)
     if (currentFileHandle) {
@@ -534,6 +548,124 @@ async function doLoadRaf() {
   } finally {
     hideLoading()
     updateUI()
+  }
+}
+
+// ==========================================================================
+// Folder browsing
+// ==========================================================================
+
+async function openFolder() {
+  if (typeof window.showDirectoryPicker !== 'function') {
+    log('Folder access not supported in this browser (use Chrome/Edge)')
+    return
+  }
+  try {
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
+    const files: FileSystemFileHandle[] = []
+    for await (const [, handle] of dir.entries()) {
+      if (handle.kind === 'file' && /\.raf$/i.test(handle.name)) {
+        files.push(handle as FileSystemFileHandle)
+      }
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name))
+
+    if (files.length === 0) {
+      log(`No RAF files found in "${dir.name}"`)
+      return
+    }
+
+    folderHandle = dir
+    folderFiles = files
+    folderIndex = 0
+    log(`Opened folder "${dir.name}" — ${files.length} RAF files`)
+    await loadFolderFile(0)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return
+    log(`Folder error: ${err}`)
+  }
+}
+
+async function loadFolderFile(index: number) {
+  const handle = folderFiles[index]
+  if (!handle) return
+  const file = await handle.getFile()
+  const data = await file.arrayBuffer()
+
+  rafFileName = file.name
+  rafData = data
+  currentFileHandle = handle
+  folderIndex = index
+  updateFolderNav()
+  await doLoadRaf()
+}
+
+function navigateFolder(delta: 1 | -1) {
+  if (!folderFiles.length) return
+  const next = folderIndex + delta
+  if (next < 0 || next >= folderFiles.length) return
+  loadFolderFile(next)
+}
+
+function updateFolderNav() {
+  const hasFolder = folderFiles.length > 0
+  folderNavEl.hidden = !hasFolder
+  btnSaveFolder.hidden = !hasFolder
+  if (!hasFolder) return
+  const name = rafFileName || ''
+  navInfoEl.innerHTML = `${name} <span class="nav-counter">${folderIndex + 1}/${folderFiles.length}</span>`
+  btnPrev.disabled = folderIndex === 0
+  btnNext.disabled = folderIndex === folderFiles.length - 1
+}
+
+async function saveToFolder() {
+  if (!folderHandle) return
+  const url = showingOriginal ? originalBlobUrl : resultBlobUrl
+  if (!url) return
+  try {
+    const base = rafFileName.replace(/\.RAF$/i, '')
+    const fileName = showingOriginal ? `${base}_original.jpg` : `${base}_converted.jpg`
+    const blob = await fetch(url).then(r => r.blob())
+    const fh = await folderHandle.getFileHandle(fileName, { create: true })
+    const writable = await fh.createWritable()
+    await writable.write(blob)
+    await writable.close()
+    log(`Saved: ${fileName}`)
+  } catch (err) {
+    log(`Save error: ${err}`)
+  }
+}
+
+async function loadExif(data: ArrayBuffer) {
+  photoMetaEl.hidden = true
+  try {
+    const { parse } = await import('exifr')
+    const exif = await parse(data, {
+      pick: ['Model', 'ISO', 'FNumber', 'ExposureTime', 'FocalLength', 'DateTimeOriginal'],
+      translateValues: false,
+    }) as Record<string, unknown> | undefined
+    if (!exif) return
+
+    const parts: string[] = []
+    if (exif.Model) parts.push(String(exif.Model).replace(/^FUJIFILM\s*/i, ''))
+    if (exif.ISO) parts.push(`ISO ${exif.ISO}`)
+    if (exif.FNumber) parts.push(`f/${Number(exif.FNumber).toFixed(1)}`)
+    if (exif.ExposureTime) {
+      const t = Number(exif.ExposureTime)
+      parts.push(t >= 1 ? `${t}s` : `1/${Math.round(1 / t)}s`)
+    }
+    if (exif.FocalLength) parts.push(`${Math.round(Number(exif.FocalLength))}mm`)
+    if (exif.DateTimeOriginal) {
+      const d = new Date(exif.DateTimeOriginal as string)
+      if (!isNaN(d.getTime())) parts.push(d.toLocaleDateString())
+    }
+
+    if (parts.length) {
+      photoMetaEl.textContent = parts.join(' · ')
+      photoMetaEl.hidden = false
+    }
+  } catch {
+    // EXIF parsing is optional
   }
 }
 
@@ -1755,6 +1887,11 @@ function resetApp() {
   showingOriginal = false
   resultPanel.classList.remove('visible')
   canvasEmpty.hidden = false
+  photoMetaEl.hidden = true
+  folderHandle = null
+  folderFiles = []
+  folderIndex = -1
+  updateFolderNav()
   lastRenderedSettings = null
   needsRenderText.classList.remove('visible')
   previewStatus.textContent = ''
@@ -2024,6 +2161,20 @@ btnSelectRaf.addEventListener('click', async () => {
     })
     input.click()
   }
+})
+
+// Folder browsing
+btnOpenFolder.addEventListener('click', openFolder)
+btnPrev.addEventListener('click', () => navigateFolder(-1))
+btnNext.addEventListener('click', () => navigateFolder(1))
+btnSaveFolder.addEventListener('click', saveToFolder)
+
+// Keyboard arrow navigation
+document.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+  if (!folderFiles.length) return
+  if (e.key === 'ArrowLeft') { e.preventDefault(); navigateFolder(-1) }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); navigateFolder(1) }
 })
 
 // Render button — manual trigger when auto-render is off

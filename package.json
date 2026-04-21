@@ -11,5 +11,8 @@
   "devDependencies": {
     "typescript": "^5.7",
     "vite": "^6"
+  },
+  "dependencies": {
+    "exifr": "^7.1.3"
   }
 }
