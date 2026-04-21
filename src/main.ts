@@ -564,7 +564,7 @@ async function openFolder() {
     const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
     const files: FileSystemFileHandle[] = []
     for await (const [, handle] of dir.entries()) {
-      if (handle.kind === 'file' && /\.raf$/i.test(handle.name)) {
+      if (handle.kind === 'file' && /\.raf$/i.test(handle.name) && !handle.name.startsWith('._')) {
         files.push(handle as FileSystemFileHandle)
       }
     }
