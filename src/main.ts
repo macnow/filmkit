@@ -624,7 +624,26 @@ async function saveToFolder() {
   if (!url) return
   try {
     const base = rafFileName.replace(/\.RAF$/i, '')
-    const fileName = showingOriginal ? `${base}_original.jpg` : `${base}_converted.jpg`
+    const fileName = showingOriginal ? `${base}_original.JPG` : `${base}.JPG`
+
+    // Check if file already exists
+    let exists = false
+    try {
+      await folderHandle.getFileHandle(fileName)
+      exists = true
+    } catch {
+      // NotFoundError — file doesn't exist, proceed
+    }
+
+    if (exists) {
+      const choice = await showDialog(
+        'File exists',
+        `${fileName} already exists. Overwrite?`,
+        [{ label: 'Cancel' }, { label: 'Overwrite', primary: true }],
+      )
+      if (choice !== 1) return
+    }
+
     const blob = await fetch(url).then(r => r.blob())
     const fh = await folderHandle.getFileHandle(fileName, { create: true })
     const writable = await fh.createWritable()
